@@ -1711,12 +1711,13 @@ class FactTable(object):
 
     """A class for accessing a fact table in the DW."""
 
-    def __init__(self, name, keyrefs, measures=(), targetconnection=None):
+    def __init__(self, name, keyrefs, measures=(),otherrefs = (), targetconnection=None):
         """Arguments:
            - name: the name of the fact table in the DW
            - keyrefs: a sequence of attribute names that constitute the
              primary key of the fact tables (i.e., the dimension references)
            - measures: a possibly empty sequence of measure names. Default: ()
+           - otherrefs: a sequence of dimension references that can be updated.
            - targetconnection: The ConnectionWrapper to use. If not given,
              the default target connection is used.
         """
@@ -1726,6 +1727,7 @@ class FactTable(object):
         self.name = name
         self.keyrefs = keyrefs
         self.measures = measures
+        self.otherrefs = otherrefs
         self.all = [k for k in keyrefs] + [m for m in measures]
         pygrametl._alltables.append(self)
 
@@ -1738,6 +1740,11 @@ class FactTable(object):
         self.insertsql = "INSERT INTO " + name + "(" + \
             ", ".join(self.quotelist(self.all)) + ") VALUES (" + \
             ", ".join(["%%(%s)s" % (att,) for att in self.all]) + ")"
+
+        if otherrefs:
+            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.otherrefs]) + " where " + " and ".join(["%s = %%(%s)s" % (att,att) for att in self.keyrefs])
+        else:
+            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.measures]) + " where " + " and ".join(["%s = %%(%s)s" % (att,att) for att in self.keyrefs])
 
         # SELECT key1, ..., keyn, meas1, ..., measn FROM name
         # WHERE key1 = %(key1)s AND ... keyn = %(keyn)s
@@ -1765,6 +1772,28 @@ class FactTable(object):
         return None
 
     def _after_insert(self, row, namemapping):
+        pass
+
+    def update(self, row, namemapping={}):
+        """Insert a fact into the fact table.
+
+           Arguments:
+               
+           - row: a dict at least containing values for all the fact table's 
+             attributes (both keys/references and measures).
+           - namemapping: an optional namemapping (see module's documentation)
+        """
+        tmp = self._before_update(row, namemapping)
+        if tmp:
+            return
+
+        self.targetconnection.execute(self.updatesql, row, namemapping)
+        self._after_update(row, namemapping)
+
+    def _before_update(self, row, namemapping):
+        return None
+
+    def _after_update(self, row, namemapping):
         pass
 
     def _emptyfacttonone(self, argdict):
@@ -1842,7 +1871,7 @@ class BatchFactTable(FactTable):
        performs insertions in batches.
     """
 
-    def __init__(self, name, keyrefs, measures=(), batchsize=10000,
+    def __init__(self, name, keyrefs, measures=(),otherrefs = (), batchsize=10000,
                  usemultirow=False, targetconnection=None):
         """Arguments:
             
@@ -1850,6 +1879,7 @@ class BatchFactTable(FactTable):
            - keyrefs: a sequence of attribute names that constitute the
              primary key of the fact tables (i.e., the dimension references)
            - measures: a possibly empty sequence of measure names. Default: ()
+           - otherrefs: a sequence of dimension references that can be updated.
            - batchsize: an int deciding many insert operations should be done
              in one batch. Default: 10000
            - usemultirow: load batches with an INSERT INTO name VALUES statement
@@ -1863,10 +1893,14 @@ class BatchFactTable(FactTable):
                            name=name,
                            keyrefs=keyrefs,
                            measures=measures,
+                           otherrefs = otherrefs,
                            targetconnection=targetconnection)
 
         self.__batchsize = batchsize
         self.__batch = []
+        self.__upbatch = []
+        self.batchsize = len(self.__batch)
+        self.upbatchsize = len(self.__upbatch)
         if usemultirow:
             self.__insertnow = self.__insertmultirow
             self.__basesql = self.insertsql[:self.insertsql.find(' (') + 1]
@@ -1878,7 +1912,15 @@ class BatchFactTable(FactTable):
 
     def _before_insert(self, row, namemapping):
         self.__batch.append(pygrametl.project(self.all, row, namemapping))
-        if len(self.__batch) == self.__batchsize:
+        self.batchsize = len(self.__batch)
+        if self.batchsize == self.__batchsize:
+            self.__insertnow()
+        return True  # signal that we did something
+
+    def _before_update(self, row, namemapping):
+        self.__upbatch.append(pygrametl.project(self.all, row, namemapping))
+        self.upbatchsize = len(self.__upbatch)
+        if self.upbatchsize == self.__batchsize:
             self.__insertnow()
         return True  # signal that we did something
 
@@ -1901,6 +1943,9 @@ class BatchFactTable(FactTable):
             self.targetconnection.executemany(self.insertsql, self.__batch)
             self.__batch = []
 
+        if self.__upbatch:
+            self.targetconnection.executemany(self.updatesql, self.__upbatch)
+            self.__upbatch = []
 
 class AccumulatingSnapshotFactTable(FactTable):
 
