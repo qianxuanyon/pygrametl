@@ -4,3 +4,5 @@ tests
 *.pyproj
 *.sln
 /test
+*.zip
+/build/lib/pygrametl

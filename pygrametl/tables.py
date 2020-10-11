@@ -1742,9 +1742,9 @@ class FactTable(object):
             ", ".join(["%%(%s)s" % (att,) for att in self.all]) + ")"
 
         if otherrefs:
-            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.otherrefs]) + " where " + " and ".join(["%s = %%(%s)s" % (att,att) for att in self.keyrefs])
+            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.otherrefs]) + " where " + " and ".join(["%s = %%(%s)s" % (self.quote(att),att) for att in self.keyrefs])
         else:
-            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.measures]) + " where " + " and ".join(["%s = %%(%s)s" % (att,att) for att in self.keyrefs])
+            self.updatesql = "UPDATE "+ name +" set " + ", ".join(["%s = %%(%s)s" % (att,att) for att in self.measures]) + " where " + " and ".join(["%s = %%(%s)s" % (self.quote(att),att) for att in self.keyrefs])
 
         # SELECT key1, ..., keyn, meas1, ..., measn FROM name
         # WHERE key1 = %(key1)s AND ... keyn = %(keyn)s
@@ -1925,7 +1925,7 @@ class BatchFactTable(FactTable):
         return True  # signal that we did something
 
     def _before_lookup(self, keyvalues, namemapping):
-        self.__insertnow()
+        pass
 
     def endload(self):
         """Finalize the load."""
